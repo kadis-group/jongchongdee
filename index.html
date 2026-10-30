@@ -2,8 +2,14 @@
 <html lang="th"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>สั่งล่วงหน้า จงชงดี หนองผึ้ง</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com">
+<link rel="preconnect" href="https://static.line-scdn.net">
+<link rel="preconnect" href="https://api.line.me">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mitr:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
 <style>
+
 /* Layout: single mobile column — pickup picker, menu grid, detail sheet, cart, payment; sticky action bar */
 :root{
   --ink:#241714; --ink-soft:#6b5450; --line:#e8dcd8;
@@ -122,7 +128,6 @@ select{font:inherit;font-size:13.5px;width:100%;background:var(--card-2);color:v
 .oid{font-family:var(--f-body);font-weight:700;font-size:15px;letter-spacing:.09em;margin-top:14px;background:var(--card-2);border:1px solid var(--line);border-radius:3px;padding:9px 14px;display:inline-block}
 .foot{font-size:11px;color:var(--ink-soft);text-align:center;margin-top:22px;line-height:1.6}
 .demo{font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--brand-deep);background:color-mix(in srgb,var(--pop) 30%,transparent);border-radius:2px;padding:2px 7px;display:inline-block;margin-top:14px}
-
 img{max-width:100%}[hidden]{display:none!important}#qrbox img,#qrbox canvas{display:block;margin:0 auto}</style></head>
 <body><header>
   <div class="hbar">
@@ -138,9 +143,9 @@ img{max-width:100%}[hidden]{display:none!important}#qrbox img,#qrbox canvas{disp
 </div>
 <div class="bar" id="bar" hidden><div class="bar-in" id="barin"></div></div>
 
-<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script id="liffsdk" src="https://static.line-scdn.net/liff/edge/2/sdk.js" async></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
 <script>
 const LIFF_ID="2012300584-y5UqCdH1";
 const API="https://script.google.com/macros/s/AKfycbzhgL_PjtiL69InY9MfgeU6qiBqjy9AOtIQpsokZsyxdlnNswn9122UGcxS2obP4J0/exec";
@@ -157,26 +162,72 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 
 let M=null, idToken=null, cart=[], screen="pickup", agreed=false, cname="", day=null, time=null, order=null, done=null, clockSkew=0;
 
-/* ---------- เริ่มต้น ---------- */
-async function boot(){
-  try{
-    await liff.init({liffId:LIFF_ID});
-    if(!liff.isLoggedIn()){liff.login({redirectUri:location.href});return}
-    idToken=liff.getIDToken();
-    try{const p=await liff.getProfile();cname=(p.displayName||"").slice(0,20)}catch(e){}
-  }catch(e){V.innerHTML='<div class="notice"><b>เปิดหน้าสั่งไม่สำเร็จ</b> รบกวนเปิดจากเมนูในแชท LINE ของร้านนะคะ</div>';return}
-  try{
-    M=await (await fetch(API+"?api=menu")).json();
-    clockSkew=M.now-(new Date().getHours()*60+new Date().getMinutes());
-  }catch(e){V.innerHTML='<div class="notice"><b>โหลดเมนูไม่สำเร็จ</b> รบกวนปิดแล้วเปิดใหม่อีกครั้งนะคะ</div>';return}
+/* ---------- เริ่มต้น ----------
+   โหลดเร็ว: เริ่มดึงเมนูทันทีพร้อมกับเปิด LINE (ไม่ต้องรอกัน)
+   แสดงหน้าเลือกเวลาได้ทันทีจากเมนูที่จำไว้ในเครื่อง แล้วค่อยอัปเดตเมื่อเมนูล่าสุดมาถึง */
+const LS_KEY="jcd_menu_v1";
+const DEF={ok:true,open:"07:30",close:"19:30",last:"19:15",lead:15,step:5,days:7,policy:"",online:true,drinks:[],breads:[],tops:[],_def:1};
+const menuP=fetch(API+"?api=menu").then(r=>r.json()).then(m=>{if(!m||!m.ok)throw 0;return m});
+menuP.catch(()=>{});
+const sdkLoaded=new Promise((res,rej)=>{if(window.liff)return res();const s=document.getElementById("liffsdk");s.addEventListener("load",res);s.addEventListener("error",rej)});
+let liffReady=null, fresh=false;
+function bkk(){
+  try{const p=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Bangkok",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
+    const g=t=>p.find(x=>x.type===t).value;return {today:g("year")+"-"+g("month")+"-"+g("day"),now:+g("hour")*60+ +g("minute")}}
+  catch(e){const d=new Date();return {today:d.getFullYear()+"-"+two(d.getMonth()+1)+"-"+two(d.getDate()),now:d.getHours()*60+d.getMinutes()}}
+}
+function applyMenu(m){
+  M=m;clockSkew=M.now-(new Date().getHours()*60+new Date().getMinutes());
   document.getElementById("hours").textContent=M.open+"–"+M.close;
   document.getElementById("foothours").textContent="เปิดทุกวัน "+M.open+"–"+M.close+" น. · รับออเดอร์ล่วงหน้าได้ถึง "+M.last+" น.";
-  if(!M.online){V.innerHTML='<div class="notice"><b>ขณะนี้ร้านปิดรับออเดอร์ออนไลน์ชั่วคราว</b> แวะมาที่หน้าร้านได้เลยค่ะ</div>';return}
-  if(M.pausedUntil&&M.pausedUntil>Date.now()){const t=new Date(M.pausedUntil);
-    V.innerHTML='<div class="notice"><b>ร้านยุ่งมากช่วงนี้ เลยหยุดรับออเดอร์ชั่วคราว</b> กลับมาสั่งได้อีกครั้งราว '+two(t.getHours())+":"+two(t.getMinutes())+' น. นะคะ</div>';return}
-  render();
 }
+function gate(){
+  if(!["pickup","menu","cart"].includes(screen))return false;
+  if(!M.online){V.innerHTML='<div class="notice"><b>ขณะนี้ร้านปิดรับออเดอร์ออนไลน์ชั่วคราว</b> แวะมาที่หน้าร้านได้เลยค่ะ</div>';bar(null);return true}
+  if(M.pausedUntil&&M.pausedUntil>Date.now()){const t=new Date(M.pausedUntil);
+    V.innerHTML='<div class="notice"><b>ร้านยุ่งมากช่วงนี้ เลยหยุดรับออเดอร์ชั่วคราว</b> กลับมาสั่งได้อีกครั้งราว '+two(t.getHours())+":"+two(t.getMinutes())+' น. นะคะ</div>';bar(null);return true}
+  return false;
+}
+function startLiff(){
+  liffReady=(async()=>{
+    await sdkLoaded;
+    await liff.init({liffId:LIFF_ID});
+    if(!liff.isLoggedIn()){liff.login({redirectUri:location.href});throw "login"}
+    idToken=liff.getIDToken();
+    liff.getProfile().then(p=>{if(cname)return;cname=(p.displayName||"").slice(0,20);
+      const i=document.getElementById("nm");if(i&&!i.value){i.value=cname;cartBar()}}).catch(()=>{});
+  })();
+  liffReady.catch(e=>{if(e==="login")return;
+    V.innerHTML='<div class="notice"><b>เปิดหน้าสั่งไม่สำเร็จ</b> รบกวนเปิดจากเมนูในแชท LINE ของร้านนะคะ</div>';bar(null)});
+}
+const strip=m=>JSON.stringify(Object.assign({},m,{now:0,today:0,pausedUntil:0,_def:0}));
+async function boot(){
+  let cached=null;try{cached=JSON.parse(localStorage.getItem(LS_KEY)||"null")}catch(e){}
+  const b=bkk();
+  applyMenu(Object.assign({},cached||DEF,{today:b.today,now:b.now,pausedUntil:0}));
+  if(!gate())render();
+  startLiff();
+  let m;
+  try{m=await menuP}catch(e){
+    if(!cached&&screen==="pickup"){V.innerHTML='<div class="notice"><b>โหลดเมนูไม่สำเร็จ</b> รบกวนปิดแล้วเปิดใหม่อีกครั้งนะคะ</div>';bar(null)}
+    return}
+  fresh=true;
+  try{localStorage.setItem(LS_KEY,JSON.stringify(Object.assign({},m,{pausedUntil:0})))}catch(e){}
+  const changed=strip(m)!==strip(M)||m.today!==M.today;
+  applyMenu(m);
+  if(gate())return;
+  if(!changed)return;
+  const gone=cart.filter(l=>l.bread?!bread(l.n):!drink(l.n)||!drink(l.n).prices[l.size]);
+  if(gone.length){cart=cart.filter(l=>!gone.includes(l));
+    alertBox("ขออภัยค่ะ เมนูนี้หมดแล้ว ระบบนำออกจากตะกร้าให้: "+gone.map(l=>l.n).join(", "))}
+  const a=document.activeElement;
+  if(screen==="pickup"&&a&&a.tagName==="SELECT")return;   // ลูกค้ากำลังเลือกอยู่ หน้าจะอัปเดตเองเมื่อเลือกเสร็จ
+  if(document.querySelector(".scrim")&&!gone.length)return;
+  if(["pickup","menu","cart"].includes(screen))({pickup:renderPickup,menu:renderMenu,cart:renderCart})[screen]();
+}
+async function waitMenu(){if(fresh||!M._def)return true;try{await menuP;return fresh}catch(e){return false}}
 async function post(body){
+  try{await liffReady}catch(e){throw new Error("liff")}
   const r=await fetch(API,{method:"POST",body:JSON.stringify(Object.assign({idToken},body))});
   return r.json();
 }
@@ -236,7 +287,11 @@ function renderPickup(){
   V.querySelector("#dsel").onchange=e=>{day=e.target.value||null;time=null;renderPickup()};
   V.querySelector("#tsel").onchange=e=>{time=e.target.value?e.target.value.replace(" น.",""):null;renderPickup()};
   bar(['<button class="btn" id="next"'+(ready?"":" disabled")+'>'+(ready?"เลือกเมนู":"เลือกวันและเวลาก่อน")+'</button>']);
-  if(ready)document.getElementById("next").onclick=()=>{const hit=dropUnavailable();screen=cart.length?"cart":"menu";render();if(hit.length)topAlert(hit)};
+  if(ready)document.getElementById("next").onclick=async e=>{
+    if(!fresh&&M._def){const b=e.currentTarget;b.disabled=true;b.textContent="กำลังโหลดเมนู…";
+      if(!await waitMenu()){b.disabled=false;b.textContent="ลองใหม่อีกครั้ง";return}
+      if(gate())return}
+    const hit=dropUnavailable();screen=cart.length?"cart":"menu";render();if(hit.length)topAlert(hit)};
 }
 function topAlert(hit){
   const sc=document.createElement("div");sc.className="scrim";
@@ -361,7 +416,8 @@ function renderPay(){
    +'<li>โอนเสร็จแล้ว กลับมาที่หน้านี้ แล้วแนบสลิปด้านล่าง</li><li>ระบบตรวจสลิปอัตโนมัติ รู้ผลภายในไม่กี่วินาที</li></ol>'
    +'<label class="drop" id="drop" for="slip">แตะเพื่อแนบสลิปโอนเงิน<br><span style="font-size:11.5px">รองรับสลิปจากทุกธนาคาร</span></label>'
    +'<input type="file" id="slip" accept="image/*" hidden>';
-  new QRCode(document.getElementById("qrbox"),{text:order.qr,width:200,height:200,correctLevel:QRCode.CorrectLevel.M});
+  const mkQR=()=>{const box=document.getElementById("qrbox");if(!box)return;if(!window.QRCode)return setTimeout(mkQR,150);
+    new QRCode(box,{text:order.qr,width:200,height:200,correctLevel:QRCode.CorrectLevel.M})};mkQR();
   V.querySelector("#slip").onchange=e=>{const f=e.target.files[0];if(f)checkSlip(f);e.target.value=""};
   bar(['<button class="btn btn-ghost" id="back">แก้ไขออเดอร์</button>','<button class="btn" disabled>รอแนบสลิป</button>']);
   document.getElementById("back").onclick=()=>{screen="cart";render()};
@@ -382,6 +438,7 @@ function decodeSlip(file){
 }
 async function checkSlip(file){
   const drop=document.getElementById("drop");drop.textContent="กำลังตรวจสอบสลิป…";
+  for(let i=0;i<30&&!window.jsQR;i++)await new Promise(r=>setTimeout(r,200));
   const qr=await decodeSlip(file);
   if(!qr){drop.innerHTML="แตะเพื่อแนบสลิปโอนเงิน";alertBox("อ่าน QR บนสลิปไม่ได้ รบกวนแนบรูปสลิปเต็มใบที่เห็น QR มุมล่างชัด ๆ นะคะ");return}
   try{
