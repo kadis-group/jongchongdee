@@ -116,7 +116,7 @@ select{font:inherit;font-size:13.5px;width:100%;background:var(--card-2);color:v
 .qrbox{width:168px;height:168px;margin:0 auto 12px;border-radius:3px;background:repeating-linear-gradient(90deg,var(--ink) 0 7px,transparent 7px 14px),repeating-linear-gradient(0deg,var(--ink) 0 7px,var(--card) 7px 14px);opacity:.82}
 .qr .big{font-family:var(--f-body);font-weight:700;font-size:26px;font-variant-numeric:tabular-nums;line-height:1.2}
 .qr .sub{font-size:12px;color:var(--ink-soft);margin-top:3px}
-.drop{margin-top:14px;border:1.5px dashed var(--line);border-radius:4px;padding:20px 14px;text-align:center;font-size:13px;color:var(--ink-soft);background:var(--card);cursor:pointer}
+.drop{display:block;margin-top:14px;border:1.5px dashed var(--line);border-radius:4px;padding:20px 14px;text-align:center;font-size:13px;color:var(--ink-soft);background:var(--card);cursor:pointer}
 .steps{list-style:none;margin:16px 0 0;padding:0;counter-reset:s}
 .steps li{counter-increment:s;position:relative;padding-left:30px;font-size:12.5px;color:var(--ink-soft);margin-bottom:9px}
 .steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:20px;height:20px;border-radius:50%;background:var(--card-2);border:1px solid var(--line);color:var(--ink);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
@@ -128,6 +128,8 @@ select{font:inherit;font-size:13.5px;width:100%;background:var(--card-2);color:v
 .oid{font-family:var(--f-body);font-weight:700;font-size:15px;letter-spacing:.09em;margin-top:14px;background:var(--card-2);border:1px solid var(--line);border-radius:3px;padding:9px 14px;display:inline-block}
 .foot{font-size:11px;color:var(--ink-soft);text-align:center;margin-top:22px;line-height:1.6}
 .demo{font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--brand-deep);background:color-mix(in srgb,var(--pop) 30%,transparent);border-radius:2px;padding:2px 7px;display:inline-block;margin-top:14px}
+
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:60;background:var(--ink);color:var(--paper);font-size:13px;line-height:1.5;padding:10px 14px;border-radius:6px;max-width:calc(100% - 32px);text-align:center;box-shadow:0 6px 20px rgba(0,0,0,.18)}
 img{max-width:100%}[hidden]{display:none!important}#qrbox img,#qrbox canvas{display:block;margin:0 auto}</style></head>
 <body><header>
   <div class="hbar">
@@ -158,6 +160,7 @@ const two=n=>String(n).padStart(2,"0");
 const baht=n=>Number(n).toLocaleString("th-TH");
 const hhmm=m=>two(Math.floor(m/60))+":"+two(m%60);
 const toMin=s=>{const m=String(s).match(/(\d+):(\d+)/);return m?+m[1]*60+ +m[2]:0};
+function toast(m){document.querySelectorAll(".toast").forEach(t=>t.remove());const t=document.createElement("div");t.className="toast";t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),4200)}
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 let M=null, idToken=null, cart=[], screen="pickup", agreed=false, cname="", day=null, time=null, order=null, done=null, clockSkew=0;
@@ -205,6 +208,7 @@ async function boot(){
   let cached=null;try{cached=JSON.parse(localStorage.getItem(LS_KEY)||"null")}catch(e){}
   const b=bkk();
   applyMenu(Object.assign({},cached||DEF,{today:b.today,now:b.now,pausedUntil:0}));
+  loadPending();
   if(!gate())render();
   startLiff();
   let m;
@@ -230,6 +234,60 @@ async function post(body){
   try{await liffReady}catch(e){throw new Error("liff")}
   const r=await fetch(API,{method:"POST",body:JSON.stringify(Object.assign({idToken},body))});
   return r.json();
+}
+
+
+/* ---------- จำออเดอร์ที่รอจ่ายไว้ในเครื่อง (เผื่อ LINE โหลดหน้าใหม่ตอนสลับไปแอปธนาคาร) ---------- */
+const PEND="jcd_pending_v1";
+function savePending(){try{localStorage.setItem(PEND,JSON.stringify({at:Date.now(),order,day,time,cname,cart,agreed}))}catch(e){}}
+function clearPending(){try{localStorage.removeItem(PEND)}catch(e){}}
+function loadPending(){try{const p=JSON.parse(localStorage.getItem(PEND)||"null");
+  if(!p||!p.order||Date.now()-p.at>3*3600e3){clearPending();return false}
+  ({order,day,time,cname,cart,agreed}=p);screen="pay";return true}catch(e){return false}}
+
+/* ---------- บันทึก QR เป็นรูป ---------- */
+function qrCanvas(text,size){const d=document.createElement("div");new QRCode(d,{text,width:size,height:size,correctLevel:QRCode.CorrectLevel.M});return d.querySelector("canvas")}
+async function qrImageURL(){
+  try{await Promise.race([document.fonts.load('600 40px "Noto Sans Thai"'),new Promise(r=>setTimeout(r,800))])}catch(e){}
+  const W=720,H=1010,c=document.createElement("canvas");c.width=W;c.height=H;const g=c.getContext("2d"),F='"Noto Sans Thai",sans-serif';
+  g.fillStyle="#fff";g.fillRect(0,0,W,H);g.fillStyle="#cf1b26";g.fillRect(0,0,W,120);
+  g.textAlign="center";g.fillStyle="#fff";g.font="600 40px "+F;g.fillText("จงชงดี สาขาหนองผึ้ง สารภี",W/2,76);
+  g.imageSmoothingEnabled=false;g.drawImage(qrCanvas(order.qr,560),80,165,560,560);
+  g.fillStyle="#241714";g.font="700 66px "+F;g.fillText(baht(order.total)+" บาท",W/2,820);
+  g.fillStyle="#6b5450";g.font="400 28px "+F;
+  g.fillText("รับ "+dayLabel()+" เวลา "+time+" น.",W/2,874);
+  g.fillText("ออเดอร์ "+(order.id||""),W/2,914);
+  g.fillText("Thai QR · สแกนจ่ายได้ทุกธนาคาร",W/2,962);
+  return c.toDataURL("image/png");
+}
+async function saveQR(){
+  const b=document.getElementById("saveqr");if(!window.QRCode){toast("รอสักครู่นะคะ");return}
+  b.disabled=true;const label=b.textContent;b.textContent="กำลังเตรียมรูป…";
+  try{
+    const url=await qrImageURL(),name="jongchongdee-QR-"+(order.id||"order")+".png";
+    const blob=await (await fetch(url)).blob(),file=new File([blob],name,{type:"image/png"});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){
+      try{await navigator.share({files:[file]});return}catch(e){if(e&&e.name==="AbortError")return}
+    }
+    const inLine=window.liff&&liff.isInClient&&liff.isInClient();
+    if(inLine&&/Android/i.test(navigator.userAgent)){
+      // แอป LINE บน Android บันทึกรูปจากในแอปไม่ได้ เลยเปิดหน้าบันทึกรูปใน Chrome แทน
+      const q=new URLSearchParams({q:order.qr,a:order.total,t:"รับ "+dayLabel()+" เวลา "+time+" น.",id:order.id||""});
+      liff.openWindow({url:location.origin+location.pathname.replace(/[^/]*$/,"")+"qr.html#"+q.toString(),external:true});
+      toast("เปิดหน้าบันทึกรูปใน Chrome แล้ว บันทึกเสร็จกลับมาแนบสลิปที่นี่ได้เลยค่ะ");return;
+    }
+    if(!inLine){const a=document.createElement("a");a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove()}
+    qrPreview(url,inLine);
+  }catch(e){toast("บันทึกรูปไม่สำเร็จ รบกวนแคปหน้าจอแทนนะคะ")}
+  finally{b.disabled=false;b.textContent=label}
+}
+function qrPreview(url,inLine){
+  const sc=document.createElement("div");sc.className="scrim";
+  sc.innerHTML='<div class="sheet" style="text-align:center"><div class="sheet-top"><h3>QR สำหรับชำระเงิน</h3><button class="x" id="cl">×</button></div>'
+   +'<img src="'+url+'" alt="QR ชำระเงิน" style="width:100%;max-width:340px;border-radius:4px;border:1px solid var(--line)">'
+   +'<div class="soon" style="margin-top:10px">'+(inLine?'กดค้างที่รูปแล้วเลือก <b>บันทึกรูปภาพ</b> หรือแคปหน้าจอนี้ไว้ได้เลยค่ะ':'ถ้ารูปยังไม่เข้าเครื่อง กดค้างที่รูปแล้วเลือกบันทึก หรือแคปหน้าจอนี้ไว้ได้เลยค่ะ')+'</div>'
+   +'<button class="btn" id="ok" style="margin-top:16px;width:100%">เรียบร้อย</button></div>';
+  document.body.appendChild(sc);sc.querySelector("#ok").onclick=sc.querySelector("#cl").onclick=()=>sc.remove();
 }
 
 /* ---------- ข้อมูลเมนู ---------- */
@@ -399,7 +457,7 @@ async function createOrder(){
   try{
     const r=await post({api:"create",day,time,name:cname.trim(),items:cart.map(l=>l.bread?{bread:1,n:l.n,qty:l.qty}:{n:l.n,size:l.size,sweet:l.sweet,tops:l.tops,qty:l.qty})});
     if(!r.ok){alertBox(r.msg||"สร้างออเดอร์ไม่สำเร็จ");cartBar();return}
-    order=r;screen="pay";render();
+    order=r;screen="pay";savePending();render();
   }catch(e){alertBox("เชื่อมต่อไม่สำเร็จ รบกวนลองใหม่อีกครั้งนะคะ");cartBar()}
 }
 function alertBox(msg){
@@ -412,15 +470,17 @@ function renderPay(){
   V.innerHTML='<h2>ชำระเงิน <span>Thai QR · K SHOP</span></h2>'
    +'<div class="qr"><div id="qrbox" style="width:220px;height:220px;margin:0 auto 12px;background:#fff;padding:10px;border-radius:4px"></div>'
    +'<div class="big">'+baht(order.total)+' บาท</div><div class="sub">จงชงดี สาขาหนองผึ้ง สารภี · รับ '+esc(dayLabel())+' เวลา '+time+' น.</div></div>'
-   +'<ol class="steps"><li>กดค้างที่ QR แล้วบันทึกรูป หรือแคปหน้าจอไว้</li><li>เปิดแอปธนาคาร เลือกสแกนจากรูปในเครื่อง ยอดเงินจะขึ้นให้เอง</li>'
+   +'<button class="btn btn-ghost" id="saveqr" style="width:100%;margin-top:12px">บันทึก QR ลงเครื่อง</button>'
+   +'<ol class="steps"><li>กดปุ่ม <b>บันทึก QR ลงเครื่อง</b> หรือแคปหน้าจอนี้ไว้</li><li>เปิดแอปธนาคาร เลือกสแกนจากรูปในเครื่อง ยอดเงินจะขึ้นให้เอง</li>'
    +'<li>โอนเสร็จแล้ว กลับมาที่หน้านี้ แล้วแนบสลิปด้านล่าง</li><li>ระบบตรวจสลิปอัตโนมัติ รู้ผลภายในไม่กี่วินาที</li></ol>'
    +'<label class="drop" id="drop" for="slip">แตะเพื่อแนบสลิปโอนเงิน<br><span style="font-size:11.5px">รองรับสลิปจากทุกธนาคาร</span></label>'
    +'<input type="file" id="slip" accept="image/*" hidden>';
   const mkQR=()=>{const box=document.getElementById("qrbox");if(!box)return;if(!window.QRCode)return setTimeout(mkQR,150);
     new QRCode(box,{text:order.qr,width:200,height:200,correctLevel:QRCode.CorrectLevel.M})};mkQR();
   V.querySelector("#slip").onchange=e=>{const f=e.target.files[0];if(f)checkSlip(f);e.target.value=""};
+  V.querySelector("#saveqr").onclick=saveQR;
   bar(['<button class="btn btn-ghost" id="back">แก้ไขออเดอร์</button>','<button class="btn" disabled>รอแนบสลิป</button>']);
-  document.getElementById("back").onclick=()=>{screen="cart";render()};
+  document.getElementById("back").onclick=()=>{clearPending();screen="cart";render()};
 }
 function decodeSlip(file){
   return new Promise((res)=>{
@@ -444,7 +504,7 @@ async function checkSlip(file){
   try{
     const r=await post({api:"slip",id:order.id,qr});
     if(!r.ok){drop.innerHTML="แตะเพื่อแนบสลิปใหม่";alertBox(r.msg||"ตรวจสลิปไม่ผ่าน");return}
-    done=r;screen="done";render();sendCard();
+    done=r;screen="done";clearPending();render();sendCard();
   }catch(e){drop.innerHTML="แตะเพื่อแนบสลิปใหม่";alertBox("เชื่อมต่อไม่สำเร็จ รบกวนแนบสลิปใหม่อีกครั้งนะคะ")}
 }
 async function sendCard(){

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>บันทึก QR ชำระเงิน จงชงดี</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700&display=swap">
+<style>
+:root{--ink:#241714;--soft:#6b5450;--line:#e8dcd8;--paper:#fbf7f4;--brand:#cf1b26}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#f6ece9;--soft:#b39c97;--line:#3a2c29;--paper:#1a1311}}
+:root[data-theme="dark"]{--ink:#f6ece9;--soft:#b39c97;--line:#3a2c29;--paper:#1a1311}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:"Noto Sans Thai",system-ui,sans-serif;line-height:1.6}
+.wrap{max-width:440px;margin:0 auto;padding:20px 16px 40px;text-align:center}
+h1{font-size:18px;margin:4px 0 4px}
+p{font-size:13.5px;color:var(--soft);margin:0 0 14px}
+img{width:100%;max-width:360px;border-radius:6px;border:1px solid var(--line);background:#fff}
+.btn{display:block;width:100%;max-width:360px;margin:14px auto 0;padding:14px;border:0;border-radius:6px;background:var(--brand);color:#fff;font:600 16px "Noto Sans Thai",sans-serif;text-decoration:none;cursor:pointer}
+.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+.ok{margin-top:16px;font-size:13.5px;color:var(--soft)}
+</style></head>
+<body><div class="wrap">
+  <h1>บันทึก QR ชำระเงิน</h1>
+  <p>กดปุ่มด้านล่างเพื่อบันทึกรูปลงเครื่อง แล้วเปิดแอปธนาคาร เลือกสแกนจากรูปในเครื่องได้เลยค่ะ</p>
+  <img id="img" alt="QR ชำระเงิน">
+  <a class="btn" id="dl">บันทึกรูปลงเครื่อง</a>
+  <button class="btn ghost" id="sh" hidden>แชร์หรือบันทึกด้วยแอปอื่น</button>
+  <div class="ok">บันทึกเสร็จแล้ว กลับไปที่แอป LINE เพื่อแนบสลิปในหน้าสั่งเดิมนะคะ</div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+const P=new URLSearchParams(location.hash.slice(1));
+const Q=P.get("q")||"",A=P.get("a")||"",T=P.get("t")||"",ID=P.get("id")||"";
+const baht=n=>Number(n).toLocaleString("th-TH");
+function qrCanvas(text,size){const d=document.createElement("div");new QRCode(d,{text,width:size,height:size,correctLevel:QRCode.CorrectLevel.M});return d.querySelector("canvas")}
+async function draw(){
+  try{await Promise.race([document.fonts.load('600 40px "Noto Sans Thai"'),new Promise(r=>setTimeout(r,1200))])}catch(e){}
+  const W=720,H=1010,c=document.createElement("canvas");c.width=W;c.height=H;const g=c.getContext("2d"),F='"Noto Sans Thai",sans-serif';
+  g.fillStyle="#fff";g.fillRect(0,0,W,H);g.fillStyle="#cf1b26";g.fillRect(0,0,W,120);
+  g.textAlign="center";g.fillStyle="#fff";g.font="600 40px "+F;g.fillText("จงชงดี สาขาหนองผึ้ง สารภี",W/2,76);
+  g.imageSmoothingEnabled=false;g.drawImage(qrCanvas(Q,560),80,165,560,560);
+  g.fillStyle="#241714";g.font="700 66px "+F;g.fillText(baht(A)+" บาท",W/2,820);
+  g.fillStyle="#6b5450";g.font="400 28px "+F;g.fillText(T,W/2,874);g.fillText(ID?"ออเดอร์ "+ID:"",W/2,914);
+  g.fillText("Thai QR · สแกนจ่ายได้ทุกธนาคาร",W/2,962);
+  return c.toDataURL("image/png");
+}
+(async()=>{
+  if(!Q){document.querySelector("p").textContent="ไม่พบข้อมูล QR รบกวนกลับไปกดบันทึกจากหน้าสั่งใน LINE อีกครั้งนะคะ";return}
+  const url=await draw(),name="jongchongdee-QR-"+(ID||"order")+".png";
+  document.getElementById("img").src=url;
+  const dl=document.getElementById("dl");dl.href=url;dl.download=name;
+  try{const file=new File([await (await fetch(url)).blob()],name,{type:"image/png"});
+    if(navigator.canShare&&navigator.canShare({files:[file]})){const s=document.getElementById("sh");s.hidden=false;
+      s.onclick=()=>navigator.share({files:[file]}).catch(()=>{})}}catch(e){}
+  try{dl.click()}catch(e){}
+})();
+</script>
+</body></html>
