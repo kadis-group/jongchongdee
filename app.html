@@ -167,6 +167,9 @@ const toMin=s=>{const m=String(s).match(/(\d+):(\d+)/);return m?+m[1]*60+ +m[2]:
 function toast(m){document.querySelectorAll(".toast").forEach(t=>t.remove());const t=document.createElement("div");t.className="toast";t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),4200)}
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+const FIXID=(()=>{try{const u=new URLSearchParams(location.search);let f=u.get("fix");
+  if(!f&&u.get("liff.state")){const st=u.get("liff.state");f=new URLSearchParams(st.slice(st.indexOf("?")+1)).get("fix")}return f||null}catch(e){return null}})();
+let FIX=null;
 let M=null, idToken=null, cart=[], screen="pickup", agreed=false, cname="", day=null, time=null, order=null, done=null, clockSkew=0;
 
 /* ---------- เริ่มต้น ----------
@@ -189,6 +192,7 @@ function applyMenu(m){
   document.getElementById("foothours").textContent="เปิดทุกวัน "+M.open+"–"+M.close+" น. · รับออเดอร์ล่วงหน้าได้ถึง "+M.last+" น.";
 }
 function gate(){
+  if(FIX||FIXID)return false;
   if(!["pickup","menu","cart"].includes(screen))return false;
   if(!M.online){V.innerHTML='<div class="notice"><b>ขณะนี้ร้านปิดรับออเดอร์ออนไลน์ชั่วคราว</b> แวะมาที่หน้าร้านได้เลยค่ะ</div>';bar(null);return true}
   if(M.pausedUntil&&M.pausedUntil>Date.now()){const t=new Date(M.pausedUntil);
@@ -209,7 +213,57 @@ function startLiff(){
     V.innerHTML='<div class="notice"><b>เปิดหน้าสั่งไม่สำเร็จ</b> รบกวนเปิดจากเมนูในแชท LINE ของร้านนะคะ</div>';bar(null)});
 }
 const strip=m=>JSON.stringify(Object.assign({},m,{now:0,today:0,pausedUntil:0,_def:0}));
+async function bootFix(){
+  let cached=null;try{cached=JSON.parse(localStorage.getItem(LS_KEY)||"null")}catch(e){}
+  const b=bkk();applyMenu(Object.assign({},cached||DEF,{today:b.today,now:b.now,pausedUntil:0}));
+  V.innerHTML='<div class="empty" style="padding:60px 0">กำลังเปิดออเดอร์ของคุณ…</div>';
+  startLiff();
+  try{
+    const [m,info]=await Promise.all([menuP,post({api:"fixinfo",id:FIXID})]);
+    applyMenu(m);fresh=true;
+    if(!info.ok){V.innerHTML='<div class="notice"><b>เปิดออเดอร์นี้ไม่ได้</b> '+esc(info.msg||"")+'</div>';return}
+    if(info.closed){V.innerHTML='<div class="notice"><b>ออเดอร์ '+esc(info.no)+' เลือกเรียบร้อยแล้ว หรือร้านดำเนินการไปแล้วค่ะ</b> ถ้ามีคำถาม พิมพ์ถามในแชต LINE ของร้านได้เลยนะคะ</div>';
+      bar(['<button class="btn" id="close">ปิดหน้านี้</button>']);document.getElementById("close").onclick=()=>{try{liff.closeWindow()}catch(e){}};return}
+    FIX=info;day=info.day;time=info.time;cname=info.name;cart=[];screen="menu";render();
+  }catch(e){if(e&&e.message==="liff")return;V.innerHTML='<div class="notice"><b>เปิดออเดอร์ไม่สำเร็จ</b> รบกวนกดปุ่มจากการ์ดใน LINE อีกครั้งนะคะ</div>'}
+}
+function fixSummary(){
+  return '<div class="notice" style="border-left-color:var(--brand)"><b>ออเดอร์ '+esc(FIX.no)+' · เลือกเมนูแทนรายการที่หมด</b><br>'
+   +'รายการที่หมด: '+FIX.out.map(esc).join(", ")+'<br>เลือกเมนูใหม่ได้ในยอดไม่เกิน <b>'+baht(FIX.credit)+' บาท</b> ถ้าเลือกน้อยกว่านี้ ร้านคืนส่วนต่างให้ค่ะ</div>'
+   +(FIX.keep.length?'<div class="pick"><div class="lab">รายการเดิมที่ร้านยังทำให้</div><div style="font-size:13.5px;line-height:1.6">'+FIX.keep.map(esc).join("<br>")+'</div></div>':'')
+   +'<div class="pick"><div class="lab">วันและเวลาที่มารับ</div><div style="font-size:14.5px;font-weight:600">'+esc(dayLabel())+' · '+esc(time)+' น.</div></div>';
+}
+function renderFixCart(){
+  const t=total(),over=t>FIX.credit,ok=cart.length&&!over;
+  V.innerHTML=fixSummary()+'<h2>เมนูใหม่ที่เลือก</h2>'
+   +(cart.length?cart.map((l,i)=>'<div class="line"><div class="meta"><div class="t">'+(l.bread?"ขนมปัง ":"")+esc(l.n)+'</div><div class="s">'+esc(describe(l))+'</div>'
+     +'<div class="acts"><span data-q="'+i+'"></span>'+(l.bread?'':'<button class="link" data-e="'+i+'">แก้ไขรายละเอียด</button>')+'<button class="link mute" data-d="'+i+'">ลบ</button></div></div>'
+     +'<div class="pr">'+baht(priceOf(l))+'</div></div>').join(""):'<div class="empty">ยังไม่ได้เลือกเมนูใหม่</div>')
+   +'<div class="tot"><span>ยอดเมนูใหม่</span><b>'+baht(t)+' / '+baht(FIX.credit)+' บาท</b></div>'
+   +(over?'<div class="notice" style="border-left-color:var(--brand)"><b>เกินยอดที่ใช้ได้ '+baht(t-FIX.credit)+' บาท</b> รบกวนลดรายการหรือเลือกไซส์เล็กลงนะคะ</div>'
+     :cart.length&&t<FIX.credit?'<div class="soon">ร้านจะคืนส่วนต่าง '+baht(FIX.credit-t)+' บาท ให้ทางแชต LINE ค่ะ</div>':'');
+  cart.forEach((l,i)=>V.querySelector('[data-q="'+i+'"]').appendChild(stepper(l.qty,1,99,v=>{if(cart[i].qty===v)return;cart[i].qty=v;renderFixCart()},true)));
+  V.querySelectorAll("[data-e]").forEach(b=>b.onclick=()=>openSheet(cart[+b.dataset.e].n,false,+b.dataset.e));
+  V.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{cart.splice(+b.dataset.d,1);render()});
+  bar(['<button class="btn btn-ghost" id="back">เลือกเพิ่ม</button>','<button class="btn" id="cf"'+(ok?"":" disabled")+'>ยืนยันเปลี่ยนเมนู</button>']);
+  document.getElementById("back").onclick=()=>{screen="menu";render()};
+  if(ok)document.getElementById("cf").onclick=async e=>{const b=e.currentTarget;b.disabled=true;b.textContent="กำลังบันทึก…";
+    try{const r=await post({api:"fix",id:FIX.id,items:cart.map(l=>l.bread?{bread:1,n:l.n,qty:l.qty}:{n:l.n,size:l.size,sweet:l.sweet,tops:l.tops,qty:l.qty})});
+      if(!r.ok){b.disabled=false;b.textContent="ยืนยันเปลี่ยนเมนู";alertBox(r.msg||"บันทึกไม่สำเร็จ");return}
+      done=r;screen="fixdone";render();
+    }catch(err){b.disabled=false;b.textContent="ยืนยันเปลี่ยนเมนู";alertBox("เชื่อมต่อไม่สำเร็จ รบกวนลองใหม่อีกครั้งนะคะ")}};
+}
+function renderFixDone(){
+  V.innerHTML='<div class="done"><div class="check">✓</div><h3>เปลี่ยนเมนูเรียบร้อยค่ะ</h3>'
+   +'<div style="color:var(--ink-soft);font-size:13px">ร้านจะแจ้งในแชต LINE เมื่อออเดอร์ '+esc(done.no)+' พร้อมรับนะคะ</div></div>'
+   +'<h2>เมนูใหม่</h2>'+cart.map(l=>'<div class="line"><div class="meta"><div class="t">'+(l.bread?"ขนมปัง ":"")+esc(l.n)+'</div><div class="s">'+esc(describe(l))+'</div></div><div class="pr">'+baht(priceOf(l))+'</div></div>').join("")
+   +(done.refund>0?'<div class="notice" style="margin-top:16px"><b>ร้านจะคืนส่วนต่าง '+baht(done.refund)+' บาท</b> รบกวนพิมพ์เบอร์พร้อมเพย์ หรือส่งรูป QR รับเงิน ไว้ในแชต LINE ของร้านนะคะ</div>':'')
+   +'<div class="notice" style="margin-top:12px"><b>มารับ '+esc(dayLabel())+' เวลา '+esc(time)+' น.</b> ที่หน้าร้านเหมือนเดิมค่ะ</div>';
+  bar(['<button class="btn" id="close">กลับไปที่แชต</button>']);
+  document.getElementById("close").onclick=()=>{try{liff.closeWindow()}catch(e){}};
+}
 async function boot(){
+  if(FIXID)return bootFix();
   let cached=null;try{cached=JSON.parse(localStorage.getItem(LS_KEY)||"null")}catch(e){}
   const b=bkk();
   applyMenu(Object.assign({},cached||DEF,{today:b.today,now:b.now,pausedUntil:0}));
@@ -334,7 +388,7 @@ function dropUnavailable(){
 }
 
 /* ---------- หน้าจอ ---------- */
-function render(){({pickup:renderPickup,menu:renderMenu,cart:renderCart,pay:renderPay,done:renderDone})[screen]();window.scrollTo(0,0)}
+function render(){(FIX?{menu:renderMenu,cart:renderFixCart,fixdone:renderFixDone}:{pickup:renderPickup,menu:renderMenu,cart:renderCart,pay:renderPay,done:renderDone})[screen]();window.scrollTo(0,0)}
 function bar(html){if(!html){BAR.hidden=true;return}BAR.hidden=false;BARIN.innerHTML=html.join("")}
 
 function renderPickup(){
@@ -376,15 +430,15 @@ function wireSummary(){const b=document.getElementById("chg");if(b)b.onclick=()=
 function renderMenu(){
   const gatedOff=M.tops.filter(t=>!topOK(t));
   const groups=[...cats().map(c=>({g:c,items:M.drinks.filter(d=>d.cat===c)})),...(M.breads.length?[{g:"ขนมปังปิ้ง",items:M.breads,b:1}]:[])];
-  V.innerHTML='<div class="notice"><b>สั่งล่วงหน้า รับที่ร้าน</b> — เลือกเมนูได้เลยค่ะ ทางร้านจะเริ่มทำเมื่อระบบตรวจยอดเงินเรียบร้อยแล้ว</div>'
-   +pickupSummary()
+  V.innerHTML=(FIX?fixSummary():'<div class="notice"><b>สั่งล่วงหน้า รับที่ร้าน</b> — เลือกเมนูได้เลยค่ะ ทางร้านจะเริ่มทำเมื่อระบบตรวจยอดเงินเรียบร้อยแล้ว</div>'
+   +pickupSummary())
    +(gatedOff.length?'<div class="notice" style="border-left-color:var(--brand)">'+gatedOff.map(t=>'<b>'+esc(t.n)+'พร้อมขายตั้งแต่ '+t.from+' น.</b>').join(" ")+' รอบรับนี้จึงยังเลือกไม่ได้ค่ะ</div>':'')
    +groups.map(s=>'<h2>'+esc(s.g)+' <span>'+s.items.length+' เมนู</span></h2><div class="grid">'
      +s.items.map(it=>{const p=s.b?it.price+" บาท":(()=>{const a=sizesOf(it);return a[0][0]+" "+a[0][1]+" – "+a[a.length-1][0]+" "+a[a.length-1][1]+" บาท"})();
         return '<button class="item" data-n="'+esc(it.n)+'"'+(s.b?' data-b="1"':'')+'><div class="n">'+esc(it.n)+'</div><div class="p">'+p+'</div>'+(it.rec?'<div class="tag">แนะนำ</div>':'')+'</button>'}).join("")+'</div>').join("");
   wireSummary();
   V.querySelectorAll(".item").forEach(b=>b.onclick=()=>openSheet(b.dataset.n,!!b.dataset.b));
-  bar(count()?['<div class="cartcount">ในตะกร้า<b>'+count()+' รายการ</b></div>','<button class="btn" id="go">ดูตะกร้า <span class="amt">'+baht(total())+' บาท</span></button>']:null);
+  bar(count()?['<div class="cartcount">'+(FIX?"เลือกแล้ว":"ในตะกร้า")+'<b>'+count()+' รายการ</b></div>','<button class="btn" id="go">'+(FIX?"ตรวจและยืนยัน":"ดูตะกร้า")+' <span class="amt">'+baht(total())+(FIX?" / "+baht(FIX.credit):"")+' บาท</span></button>']:null);
   if(count())document.getElementById("go").onclick=()=>{screen="cart";render()};
 }
 
@@ -528,8 +582,8 @@ async function sendCard(){
 }
 function renderDone(){
   const cups=cart.filter(l=>!l.bread).reduce((a,l)=>a+l.qty,0);
-  V.innerHTML='<div class="done"><div class="check">✓</div><h3>รับออเดอร์ของ '+esc(cname.trim())+' แล้วค่ะ</h3>'
-   +'<div style="color:var(--ink-soft);font-size:13px">ระบบตรวจยอดเรียบร้อย ทางร้านได้รับออเดอร์แล้ว</div>'
+  V.innerHTML='<div class="done"><div class="check">✓</div><h3>ชำระเงินเรียบร้อยค่ะ</h3>'
+   +'<div style="color:var(--ink-soft);font-size:13px">ร้านจะแจ้งในแชต LINE ของร้านเมื่อออเดอร์พร้อมรับค่ะ</div>'
    +'<div style="margin-top:16px;font-size:12px;color:var(--ink-soft)">เลขออเดอร์ของคุณ</div><div class="qbig">'+esc(done.no)+'</div>'
    +'<div style="font-size:11.5px;color:var(--ink-soft)">เลขอ้างอิง '+esc(order.id)+'</div></div>'
    +'<h2>สรุปออเดอร์</h2>'+cart.map(l=>'<div class="line"><div class="meta"><div class="t">'+(l.bread?"ขนมปัง ":"")+esc(l.n)+'</div><div class="s">'+esc(describe(l))+'</div></div><div class="pr">'+baht(priceOf(l))+'</div></div>').join("")
