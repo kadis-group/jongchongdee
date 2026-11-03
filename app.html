@@ -270,6 +270,7 @@ async function boot(){
   loadPending();
   if(!gate())render();
   startLiff();
+  if(screen==="pickup")recoverPending();
   let m;
   try{m=await menuP}catch(e){
     if(!cached&&screen==="pickup"){V.innerHTML='<div class="notice"><b>โหลดเมนูไม่สำเร็จ</b> รบกวนปิดแล้วเปิดใหม่อีกครั้งนะคะ</div>';bar(null)}
@@ -287,6 +288,16 @@ async function boot(){
   if(screen==="pickup"&&a&&a.tagName==="SELECT")return;   // ลูกค้ากำลังเลือกอยู่ หน้าจะอัปเดตเองเมื่อเลือกเสร็จ
   if(document.querySelector(".scrim")&&!gone.length)return;
   if(["pickup","menu","cart"].includes(screen))({pickup:renderPickup,menu:renderMenu,cart:renderCart})[screen]();
+}
+/* ถ้าเครื่องลืมหน้าแนบสลิป (LINE ปิดหน้าตอนไปแอปธนาคาร) ให้ถามเซิร์ฟเวอร์ว่ามีออเดอร์ที่ยังไม่จ่ายไหม */
+async function recoverPending(){
+  try{
+    const r=await post({api:"mine"});
+    if(!r||!r.order||screen!=="pickup"||day||cart.length)return;
+    order=r.order;day=r.day;time=r.time;cname=r.name;agreed=true;
+    cart=r.items.map(l=>l.bread?{bread:1,n:l.n,qty:l.qty,tops:[],price:l.price}:{n:l.n,size:l.size,sweet:l.sweet,tops:l.tops||[],qty:l.qty,price:l.price});
+    screen="pay";savePending();render();toast("กลับมาที่ออเดอร์ที่ยังไม่ได้แนบสลิปให้แล้วค่ะ");
+  }catch(e){}
 }
 async function waitMenu(){if(fresh||!M._def)return true;try{await menuP;return fresh}catch(e){return false}}
 async function post(body){
@@ -354,8 +365,9 @@ const drink=n=>M.drinks.find(d=>d.n===n), bread=n=>M.breads.find(b=>b.n===n), to
 const sizesOf=d=>["XS","S","M","L"].filter(s=>d.prices[s]).map(s=>[s,d.prices[s]]);
 const cats=()=>[...new Set(M.drinks.map(d=>d.cat))];
 function priceOf(l){
-  if(l.bread)return bread(l.n).price*l.qty;
-  return (drink(l.n).prices[l.size]+l.tops.reduce((a,t)=>a+(topOf(t)?topOf(t).price:0),0))*l.qty;
+  if(l.bread){const b=bread(l.n);return b?b.price*l.qty:(l.price||0)}
+  const d=drink(l.n);if(!d||!d.prices[l.size])return l.price||0;
+  return (d.prices[l.size]+l.tops.reduce((a,t)=>a+(topOf(t)?topOf(t).price:0),0))*l.qty;
 }
 const total=()=>cart.reduce((a,l)=>a+priceOf(l),0);
 const count=()=>cart.reduce((a,l)=>a+l.qty,0);
